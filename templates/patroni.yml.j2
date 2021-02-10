@@ -3,10 +3,8 @@ namespace: /db/
 name: {{ hostname }}
 
 restapi:
-    # listen: {{ hostvars[inventory_hostname]['ansible_' + patroni_interface].ipv4.address }}:8008
-    listen: 0.0.0.0:8008
-    # connect_address: {{ hostvars[inventory_hostname]['ansible_' + patroni_interface].ipv4.address }}:8008
-    connect_address: 0.0.0.0:8008
+    listen: {{ hostvars[inventory_hostname]['ansible_' + patroni_interface].ipv4.address }}:8008
+    connect_address: {{ hostvars[inventory_hostname]['ansible_' + patroni_interface].ipv4.address }}:8008
 
 etcd3:
     host: {{ virtual_ip_etcd }}:12379
