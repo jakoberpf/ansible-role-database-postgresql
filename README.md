@@ -1,5 +1,12 @@
 # ansible-role-postgresql
 
+https://medium.com/searce/design-a-highly-available-postgresql-cluster-with-patroni-in-gcp-part-2-9df6ab4de741
+https://www.alibabacloud.com/blog/how-to-set-up-a-highly-available-postgresql-cluster-using-patroni-on-ubuntu-16-04_594477
+
+with 
+
+https://github.com/zalando/patroni
+
 Role Name
 =========
 
@@ -28,17 +35,14 @@ Including an example of how to use your role (for instance, with variables passe
     - hosts: servers
       roles:
 
-      - name: database/etcd
-          vars:
-            # Defined by directory (look for individual server certificates)
-            etcd_server_dir: /path/to/tls/certificates
-
-            # or
-
-            # Defined by file (look for a single server certificate)
-            etcd_server: /path/to/tls/certificates
-            etcd_ca: /path/to/tls/certificates
-            etcd_interface: ens5
+    - name: database/postgresql
+      vars:
+        virtual_ip_etcd: 10.0.0.8
+        inventory_groupname: postgres
+        patroni_server: ../certificates/etcd
+        patroni_ca: ../certificates/ca
+        patroni_tls: yes
+        patroni_interface: eth0.10
 
 https://thenewstack.io/tutorial-set-up-a-secure-and-highly-available-etcd-cluster/
 
