@@ -1,0 +1,200 @@
+---
+
+- name: Install postgresql
+  become: true
+  apt:
+    pkg: 
+      - postgresql-12 
+      - postgresql-server-dev-12
+  register: postgresql_installed
+
+# - name: Ensure postgresql is in a running state
+#   service:
+#     name: postgresql 
+#     state: started
+#   register: postgresqlDetails
+#   until: postgresqlDetails.status.ActiveState == "active"
+#   retries: 15
+#   delay: 20
+#   when: postgresql_installed.changed
+
+- name: Stop postgresql
+  become: yes
+  service:
+    name: postgresql
+    daemon_reload: yes
+    enabled: yes
+    state: stopped
+
+# - name: Create a symbolic link
+#   become: yes
+#   ansible.builtin.file:
+#     src: /usr/lib/postgresql/12/bin/
+#     dest: /usr/sbin/
+#     state: link
+#     force: yes
+
+- name: Check that the somefile.conf exists
+  become: yes
+  stat:
+    path: /usr/sbin/pg_ctl
+  register: pg_ctl
+
+- name: symbol link
+  become: yes
+  shell: ln -s /usr/lib/postgresql/12/bin/* /usr/sbin/
+  when: not pg_ctl.stat.exists
+
+- name: Install pip for python3
+  become: true
+  apt:
+    pkg: 
+      - python3-pip 
+      - python3-dev 
+      - python3-psycopg2
+      
+# - name: Install setuptools
+#   become: yes
+#   shell: pip3 install --upgrade setuptools
+
+- name: Install patroni[etcd]
+  become: yes
+  pip:
+    name: patroni[etcd]
+
+- name: Copy certificate (defined by directory) and look for individual certificates 
+  become: yes
+  copy:
+    src: "{{ patroni_server_dir }}/{{ item }}"
+    dest: "server.pem"
+  with_items:
+    - "{{ hostname }}.pem"
+  when: patroni_server is not defined and patroni_server_dir is defined and patroni_tls
+  register: patroni_tls_certs_found
+
+- name: Copy certificate key (defined by directory) and look for individual certificates 
+  become: yes
+  copy:
+    src: "{{ patroni_server_dir }}/{{ item }}"
+    dest: "server-key.pem"
+  with_items:
+    - "{{ hostname }}-key.pem"
+  when: patroni_server is not defined and patroni_server_dir is defined and patroni_tls
+  register: patroni_tls_certs_found
+
+- name: Copy certificates (defined by file) and look for a single certificate
+  become: yes
+  copy:
+    src: "{{ item }}"
+    dest: "server.pem"
+  with_items:
+    - "{{ patroni_server }}.pem"
+  when: patroni_server is defined and patroni_server_dir is not defined and patroni_tls
+  register: patroni_tls_certs_found
+
+- name: Copy certificates (defined by file) and look for a single certificate
+  become: yes
+  copy:
+    src: "{{ item }}"
+    dest: "server-key.pem"
+  with_items:
+    - "{{ patroni_server }}-key.pem"
+  when: patroni_server is defined and patroni_server_dir is not defined and patroni_tls
+  register: patroni_tls_certs_found
+
+- name: Copy certificates authority
+  become: yes
+  copy:
+    src: "{{ item }}"
+    dest: "ca.pem"
+  with_items:
+    - "{{ patroni_ca }}.pem"
+  when: patroni_tls
+
+- name: Make directory for configs and patroni_tls certificates
+  become: yes
+  file:
+    path: /etc/patroni/
+    state: directory
+
+- name: Move ca certificate to "/etc/patroni/etcd-ca.crt"
+  become: yes
+  command: mv "ca.pem" /etc/patroni/ca.crt
+  when: patroni_tls
+
+- name: Move server certificate to "/etc/patroni/server.crt"
+  become: yes
+  command: mv "server.pem" /etc/patroni/server.crt
+  when: patroni_tls
+
+- name: Move server certificate key to "/etc/patroni/server.key"
+  become: yes
+  command: mv "server-key.pem" /etc/patroni/server.key
+  when: patroni_tls
+
+- name: Set perms for etcd-ca.crt
+  become: yes
+  file:
+    path: /etc/patroni/ca.crt
+    state: file
+    mode: 700
+  when: patroni_tls
+
+- name: Set perms for server.crt
+  become: yes
+  file:
+    path: /etc/patroni/server.crt
+    state: file
+    mode: 700
+  when: patroni_tls
+
+- name: Set perms for server.key
+  become: yes
+  file:
+    path: /etc/patroni/server.key
+    state: file
+    mode: 700
+  when: patroni_tls
+
+- name: Create config # https://patroni.readthedocs.io/en/latest/SETTINGS.html#rest-api
+  become: yes
+  template:
+    src: ../templates/patroni.yml.j2
+    dest: /etc/patroni/patroni.yml
+
+# - name: Set perms for /data/patroni
+#   become: yes
+#   file:
+#     path: /data/patroni
+#     state: directory
+#     owner: postgres
+#     group: postgres
+#     mode: 700
+
+- name: Create data dir
+  become: yes
+  shell: mkdir -p /data/patroni
+
+- name: Own data dir by postgres
+  become: yes
+  shell: chown postgres:postgres /data/patroni
+
+- name: Set perms for data dir
+  become: yes
+  shell: chmod 700 /data/patroni
+
+- name: Create config
+  become: yes
+  template:
+    src: ../templates/patroni.service.j2
+    dest: /etc/systemd/system/patroni.service
+
+- name: Enable patroni and postgresql
+  become: true
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  with_items:
+    - patroni
+    - postgresql
