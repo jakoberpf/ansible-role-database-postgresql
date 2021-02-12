@@ -8,42 +8,7 @@
       - postgresql-server-dev-12
   register: postgresql_installed
 
-# - name: Ensure postgresql is in a running state
-#   service:
-#     name: postgresql 
-#     state: started
-#   register: postgresqlDetails
-#   until: postgresqlDetails.status.ActiveState == "active"
-#   retries: 15
-#   delay: 20
-#   when: postgresql_installed.changed
-
-- name: Stop postgresql
-  become: yes
-  service:
-    name: postgresql
-    daemon_reload: yes
-    enabled: yes
-    state: stopped
-
-# - name: Create a symbolic link
-#   become: yes
-#   ansible.builtin.file:
-#     src: /usr/lib/postgresql/12/bin/
-#     dest: /usr/sbin/
-#     state: link
-#     force: yes
-
-- name: Check that the somefile.conf exists
-  become: yes
-  stat:
-    path: /usr/sbin/pg_ctl
-  register: pg_ctl
-
-- name: symbol link
-  become: yes
-  shell: ln -s /usr/lib/postgresql/12/bin/* /usr/sbin/
-  when: not pg_ctl.stat.exists
+# - name: Ensure SELinux is set to enforcing mode
 
 - name: Install pip for python3
   become: true
@@ -52,10 +17,6 @@
       - python3-pip 
       - python3-dev 
       - python3-psycopg2
-      
-# - name: Install setuptools
-#   become: yes
-#   shell: pip3 install --upgrade setuptools
 
 - name: Install patroni[etcd]
   become: yes
@@ -156,7 +117,7 @@
     mode: 700
   when: patroni_tls
 
-- name: Create config # https://patroni.readthedocs.io/en/latest/SETTINGS.html#rest-api
+- name: Create config
   become: yes
   template:
     src: ../templates/patroni.yml.j2
@@ -189,7 +150,11 @@
     src: ../templates/patroni.service.j2
     dest: /etc/systemd/system/patroni.service
 
-- name: Enable patroni and postgresql
+  ########################################
+  ## START: Just run for initialization ##
+  ########################################
+
+- name: Enable and start patroni and postgresql on leader node
   become: true
   service:
     name: "{{ item }}"
@@ -198,3 +163,67 @@
   with_items:
     - patroni
     - postgresql
+  when: inventory_hostname == leader_hostname
+
+- name: Sleep for 3 seconds to give time to postgresql to fully start up
+  wait_for:
+    timeout: 3
+  delegate_to: localhost
+
+- name: Run "patronictl list" and register the results leader node
+  become: yes
+  shell: patronictl -c /etc/patroni/patroni.yml list
+  register: members
+  when: inventory_hostname == leader_hostname
+
+- name: Output the registered results of "patronictl list" leader node
+  debug: var=members.stdout_lines
+  when: inventory_hostname == leader_hostname
+
+- name: Edit "pg_hba.conf" on leader node
+  become: true
+  blockinfile:
+        path: /data/patroni/pg_hba.conf
+        block: |
+          # Host for patroni
+          host replication replicator 127.0.0.1/32 md5
+          {% for item in groups[inventory_groupname] %}
+          host replication replicator {{ hostvars[item]['ansible_' + patroni_interface].ipv4.address }}/0 md5
+          {% endfor %}
+          host all all 0.0.0.0/0 md5
+  when: inventory_hostname == leader_hostname   
+
+- name: Run "restart postgres" and register the results
+  become: yes
+  shell: patronictl -c /etc/patroni/patroni.yml restart postgres --force
+  register: restart
+  when: inventory_hostname == leader_hostname
+
+- name: Output the registered results of "patronictl restart postgres --force"
+  debug: var=restart.stdout_lines
+  when: inventory_hostname == leader_hostname
+
+- name: Restart patroni and postgresql
+  become: true
+  service:
+    name: "{{ item }}"
+    state: restarted
+    enabled: true
+  with_items:
+    - patroni
+    - postgresql
+  when: inventory_hostname != leader_hostname
+
+  ######################################
+  ## END: Just run for initialization ##
+  ######################################
+
+- name: Run "patronictl list" and register the results leader node
+  become: yes
+  shell: patronictl -c /etc/patroni/patroni.yml list
+  register: members
+  when: inventory_hostname == groups[inventory_groupname][0]
+
+- name: Output the registered results of "patronictl list" leader node
+  debug: var=members.stdout_lines
+  when: inventory_hostname == groups[inventory_groupname][0]
