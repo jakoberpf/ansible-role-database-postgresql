@@ -163,7 +163,7 @@
   with_items:
     - patroni
     - postgresql
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == postgres_leader_hostname
 
 - name: Sleep for 3 seconds to give time to postgresql to fully start up
   wait_for:
@@ -174,11 +174,11 @@
   become: yes
   shell: patronictl -c /etc/patroni/patroni.yml list
   register: members
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == postgres_leader_hostname
 
 - name: Output the registered results of "patronictl list" leader node
   debug: var=members.stdout_lines
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == postgres_leader_hostname
 
 - name: Edit "pg_hba.conf" on leader node
   become: true
@@ -191,17 +191,17 @@
           host replication replicator {{ hostvars[item]['ansible_' + patroni_interface].ipv4.address }}/0 md5
           {% endfor %}
           host all all 0.0.0.0/0 md5
-  when: inventory_hostname == leader_hostname   
+  when: inventory_hostname == postgres_leader_hostname   
 
 - name: Run "restart postgres" and register the results
   become: yes
   shell: patronictl -c /etc/patroni/patroni.yml restart postgres --force
   register: restart
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == postgres_leader_hostname
 
 - name: Output the registered results of "patronictl restart postgres --force"
   debug: var=restart.stdout_lines
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == postgres_leader_hostname
 
 - name: Restart patroni and postgresql
   become: true
@@ -212,7 +212,7 @@
   with_items:
     - patroni
     - postgresql
-  when: inventory_hostname != leader_hostname
+  when: inventory_hostname != postgres_leader_hostname
 
   ######################################
   ## END: Just run for initialization ##
